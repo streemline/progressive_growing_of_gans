@@ -149,7 +149,7 @@ def msssim(img1, img2, max_val=255, filter_size=11, filter_sigma=1.5, k1=0.01, k
         raise RuntimeError('Input images must have four dimensions, not %d' % img1.ndim)
 
     # Note: default weights don't sum to 1.0 but do match the paper / matlab code.
-    weights = np.array(weights if weights else [0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
+    weights = np.array(weights or [0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
     levels = weights.size
     downsample_filter = np.ones((1, 2, 2, 1)) / 4.0
     im1, im2 = [x.astype(np.float32) for x in [img1, img2]]
@@ -190,7 +190,7 @@ class API:
 
     def feed(self, mode, minibatch):
         images = minibatch.transpose(0, 2, 3, 1)
-        score = msssim(images[0::2], images[1::2])
+        score = msssim(images[::2], images[1::2])
         self.sum += score * (images.shape[0] // 2)
 
     def end(self, mode):

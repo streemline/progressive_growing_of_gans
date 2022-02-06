@@ -22,7 +22,7 @@ import dataset
 #----------------------------------------------------------------------------
 
 def error(msg):
-    print('Error: ' + msg)
+    print(f'Error: {msg}')
     exit(1)
 
 #----------------------------------------------------------------------------
@@ -88,7 +88,7 @@ class TFRecordExporter:
         if self.print_progress:
             print('%-40s\r' % 'Saving labels...', end='', flush=True)
         assert labels.shape[0] == self.cur_images
-        with open(self.tfr_prefix + '-rxx.labels', 'wb') as f:
+        with open(f'{self.tfr_prefix}-rxx.labels', 'wb') as f:
             np.save(f, labels.astype(np.float32))
             
     def __enter__(self):
@@ -128,9 +128,9 @@ class ThreadPool(object):
     def __init__(self, num_threads):
         assert num_threads >= 1
         self.task_queue = Queue.Queue()
-        self.result_queues = dict()
+        self.result_queues = {}
         self.num_threads = num_threads
-        for idx in range(self.num_threads):
+        for _ in range(self.num_threads):
             thread = WorkerThread(self.task_queue)
             thread.daemon = True
             thread.start()
@@ -149,7 +149,7 @@ class ThreadPool(object):
         return result, args
 
     def finish(self):
-        for idx in range(self.num_threads):
+        for _ in range(self.num_threads):
             self.task_queue.put((None, (), None))
 
     def __enter__(self): # for 'with' statement
@@ -315,10 +315,10 @@ def create_mnistrgb(tfrecord_dir, mnist_dir, num_images=1000000, random_seed=123
     images = np.pad(images, [(0,0), (2,2), (2,2)], 'constant', constant_values=0)
     assert images.shape == (60000, 32, 32) and images.dtype == np.uint8
     assert np.min(images) == 0 and np.max(images) == 255
-    
+
     with TFRecordExporter(tfrecord_dir, num_images) as tfr:
         rnd = np.random.RandomState(random_seed)
-        for idx in range(num_images):
+        for _ in range(num_images):
             tfr.add_image(images[rnd.randint(images.shape[0], size=3)])
 
 #----------------------------------------------------------------------------
@@ -409,7 +409,7 @@ def create_lsun(tfrecord_dir, lmdb_dir, resolution=256, max_images=None):
         if max_images is None:
             max_images = total_images
         with TFRecordExporter(tfrecord_dir, max_images) as tfr:
-            for idx, (key, value) in enumerate(txn.cursor()):
+            for key, value in txn.cursor():
                 try:
                     try:
                         img = cv2.imdecode(np.fromstring(value, dtype=np.uint8), 1)

@@ -62,7 +62,11 @@ def patch_theano_gan(state):
     def flatten2(w): return w.reshape(w.shape[0], -1)
     def he_std(gain, w): return gain / np.sqrt(np.prod(w.shape[:-1]))
     def wscale(gain, w): return w * next(param_iter) / he_std(gain, w) if use_wscale else w
-    def layer(name, gain, w): return [(name + '/weight', wscale(gain, w)), (name + '/bias', next(param_iter))]
+    def layer(name, gain, w):
+        return [
+            (name + '/weight', wscale(gain, w)),
+            (f'{name}/bias', next(param_iter)),
+        ]
     
     if func.startswith('G'):
         vars += layer('4x4/Dense', relu/4, flatten2(next(param_iter).transpose(1,0,2,3)))
