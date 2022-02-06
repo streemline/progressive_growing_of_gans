@@ -169,7 +169,7 @@ def evaluate_metrics(run_id, log, metrics, num_images, real_passes, minibatch_si
         tfutil.init_uninited_vars()
         mode = 'warmup'
         obj.begin(mode)
-        for idx in range(10):
+        for _ in range(10):
             obj.feed(mode, np.random.randint(0, 256, size=[minibatch_size]+image_shape, dtype=np.uint8))
         obj.end(mode)
         metric_objs.append(obj)
@@ -208,9 +208,10 @@ def evaluate_metrics(run_id, log, metrics, num_images, real_passes, minibatch_si
                 print(fmt % val, end='')
         print()
 
+    prefix = 'network-snapshot-'
+    postfix = '.pkl'
     # Evaluate each network snapshot.
-    for snapshot_idx, snapshot_pkl in enumerate(reversed(snapshot_pkls)):
-        prefix = 'network-snapshot-'; postfix = '.pkl'
+    for snapshot_pkl in reversed(snapshot_pkls):
         snapshot_name = os.path.basename(snapshot_pkl)
         assert snapshot_name.startswith(prefix) and snapshot_name.endswith(postfix)
         snapshot_kimg = int(snapshot_name[len(prefix) : -len(postfix)])

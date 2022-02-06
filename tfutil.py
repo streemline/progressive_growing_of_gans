@@ -47,7 +47,7 @@ def lerp_clip(a, b, t):
         return a + (b - a) * tf.clip_by_value(t, 0.0, 1.0)
 
 def absolute_name_scope(scope): # Forcefully enter the specified name scope, ignoring any surrounding scopes.
-    return tf.name_scope(scope + '/')
+    return tf.name_scope(f'{scope}/')
 
 #----------------------------------------------------------------------------
 # Initialize TensorFlow graph and session using good default settings.
@@ -145,7 +145,7 @@ def autosummary(name, value):
                 return tf.identity(value)
     else: # python scalar or numpy array
         if name not in _autosummary_immediate:
-            with absolute_name_scope('Autosummary/' + id), tf.device(None), tf.control_dependencies(None):
+            with absolute_name_scope(f'Autosummary/{id}'), tf.device(None), tf.control_dependencies(None):
                 update_value = tf.placeholder(tf.float32)
                 update_op = _create_autosummary_var(name, update_value)
                 _autosummary_immediate[name] = update_op, update_value
@@ -164,7 +164,7 @@ def finalize_autosummaries():
     with tf.device(None), tf.control_dependencies(None):
         for name, vars in _autosummary_vars.items():
             id = name.replace('/', '_')
-            with absolute_name_scope('Autosummary/' + id):
+            with absolute_name_scope(f'Autosummary/{id}'):
                 sum = tf.add_n(vars)
                 avg = sum[0] / sum[1]
                 with tf.control_dependencies([avg]): # read before resetting
@@ -290,7 +290,7 @@ class Optimizer:
         assert all(var.device == dev for var in vars)
 
         # Register device and compute gradients.
-        with tf.name_scope(self.id + '_grad'), tf.device(dev):
+        with tf.name_scope(f'{self.id}_grad'), tf.device(dev):
             if dev not in self._dev_opt:
                 opt_name = self.scope.replace('/', '_') + '_opt%d' % len(self._dev_opt)
                 self._dev_opt[dev] = self.optimizer_class(name=opt_name, learning_rate=self.learning_rate, **self.optimizer_kwargs)
@@ -361,10 +361,21 @@ class Optimizer:
                     # Report statistics on the last device.
                     if dev == devices[-1]:
                         with tf.name_scope('Statistics'):
-                            ops.append(autosummary(self.id + '/learning_rate', self.learning_rate))
-                            ops.append(autosummary(self.id + '/overflow_frequency', tf.where(grad_ok, 0, 1)))
+                            ops.extend(
+                                (
+                                    autosummary(
+                                        f'{self.id}/learning_rate',
+                                        self.learning_rate,
+                                    ),
+                                    autosummary(
+                                        f'{self.id}/overflow_frequency',
+                                        tf.where(grad_ok, 0, 1),
+                                    ),
+                                )
+                            )
+
                             if self.use_loss_scaling:
-                                ops.append(autosummary(self.id + '/loss_scaling_log2', ls_var))
+                                ops.append(autosummary(f'{self.id}/loss_scaling_log2', ls_var))
 
             # Initialize variables and group everything into a single op.
             self.reset_optimizer_state()
@@ -380,7 +391,7 @@ class Optimizer:
         if not self.use_loss_scaling:
             return None
         if device not in self._dev_ls_var:
-            with absolute_name_scope(self.scope + '/LossScalingVars'), tf.control_dependencies(None):
+            with absolute_name_scope(f'{self.scope}/LossScalingVars'), tf.control_dependencies(None):
                 self._dev_ls_var[device] = tf.Variable(np.float32(self.loss_scaling_init), name='loss_scaling_var')
         return self._dev_ls_var[device]
 
@@ -435,7 +446,7 @@ class Network:
     def _init_fields(self):
         self.name               = None          # User-specified name, defaults to build func name if None.
         self.scope              = None          # Unique TF graph scope, derived from the user-specified name.
-        self.static_kwargs      = dict()        # Arguments passed to the user-supplied build func.
+        self.static_kwargs = {}
         self.num_inputs         = 0             # Number of input tensors.
         self.num_outputs        = 0             # Number of output tensors.
         self.input_shapes       = [[]]          # Input tensor shapes (NC or NCHW), including minibatch dimension.
@@ -451,14 +462,17 @@ class Network:
         self._build_func        = None          # User-supplied build function that constructs the network.
         self._build_func_name   = None          # Name of the build function.
         self._build_module_src  = None          # Full source code of the module containing the build function.
-        self._run_cache         = dict()        # Cached graph data for Network.run().
+        self._run_cache = {}
         
     def _init_graph(self):
         # Collect inputs.
-        self.input_names = []
-        for param in inspect.signature(self._build_func).parameters.values():
-            if param.kind == param.POSITIONAL_OR_KEYWORD and param.default is param.empty:
-                self.input_names.append(param.name)
+        self.input_names = [
+            param.name
+            for param in inspect.signature(self._build_func).parameters.values()
+            if param.kind == param.POSITIONAL_OR_KEYWORD
+            and param.default is param.empty
+        ]
+
         self.num_inputs = len(self.input_names)
         assert self.num_inputs >= 1
 
@@ -466,7 +480,7 @@ class Network:
         if self.name is None:
             self.name = self._build_func_name
         self.scope = tf.get_default_graph().unique_name(self.name.replace('/', '_'), mark_as_used=False)
-        
+
         # Build template graph.
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE):
             assert tf.get_variable_scope().name == self.scope
@@ -474,21 +488,32 @@ class Network:
                 with tf.control_dependencies(None): # ignore surrounding control_dependencies
                     self.input_templates = [tf.placeholder(tf.float32, name=name) for name in self.input_names]
                     out_expr = self._build_func(*self.input_templates, is_template_graph=True, **self.static_kwargs)
-            
+
         # Collect outputs.
         assert is_tf_expression(out_expr) or isinstance(out_expr, tuple)
         self.output_templates = [out_expr] if is_tf_expression(out_expr) else list(out_expr)
         self.output_names = [t.name.split('/')[-1].split(':')[0] for t in self.output_templates]
         self.num_outputs = len(self.output_templates)
         assert self.num_outputs >= 1
-        
+
         # Populate remaining fields.
         self.input_shapes   = [shape_to_list(t.shape) for t in self.input_templates]
         self.output_shapes  = [shape_to_list(t.shape) for t in self.output_templates]
         self.input_shape    = self.input_shapes[0]
         self.output_shape   = self.output_shapes[0]
-        self.vars           = OrderedDict([(self.get_var_localname(var), var) for var in tf.global_variables(self.scope + '/')])
-        self.trainables     = OrderedDict([(self.get_var_localname(var), var) for var in tf.trainable_variables(self.scope + '/')])
+        self.vars = OrderedDict(
+            [
+                (self.get_var_localname(var), var)
+                for var in tf.global_variables(f'{self.scope}/')
+            ]
+        )
+
+        self.trainables = OrderedDict(
+            [
+                (self.get_var_localname(var), var)
+                for var in tf.trainable_variables(f'{self.scope}/')
+            ]
+        )
 
     # Run initializers for all variables defined by this network.
     def reset_vars(self):
@@ -516,7 +541,7 @@ class Network:
     def get_var_localname(self, var_or_globalname):
         assert is_tf_expression(var_or_globalname) or isinstance(var_or_globalname, str)
         globalname = var_or_globalname if isinstance(var_or_globalname, str) else var_or_globalname.name
-        assert globalname.startswith(self.scope + '/')
+        assert globalname.startswith(f'{self.scope}/')
         localname = globalname[len(self.scope) + 1:]
         localname = localname.split(':')[0]
         return localname
@@ -637,7 +662,7 @@ class Network:
 
         # Build graph.
         if key not in self._run_cache:
-            with absolute_name_scope(self.scope + '/Run'), tf.control_dependencies(None):
+            with absolute_name_scope(f'{self.scope}/Run'), tf.control_dependencies(None):
                 in_split = list(zip(*[tf.split(x, num_gpus) for x in self.input_templates]))
                 out_split = []
                 for gpu in range(num_gpus):
@@ -685,7 +710,7 @@ class Network:
         layers = []
 
         def recurse(scope, parent_ops, level):
-            prefix = scope + '/'
+            prefix = f'{scope}/'
             ops = [op for op in parent_ops if op.name == scope or op.name.startswith(prefix)]
 
             # Does not contain leaf nodes => expand immediate children.
@@ -724,11 +749,18 @@ class Network:
             if hide_layers_with_no_params and num_params == 0:
                 continue
 
-            print('%-28s%-12s%-24s%-24s' % (
-                layer_name,
-                num_params if num_params else '-',
-                layer_output.shape,
-                weights[0].shape if len(weights) == 1 else '-'))
+            print(
+                (
+                    '%-28s%-12s%-24s%-24s'
+                    % (
+                        layer_name,
+                        num_params or '-',
+                        layer_output.shape,
+                        weights[0].shape if len(weights) == 1 else '-',
+                    )
+                )
+            )
+
 
         print('%-28s%-12s%-24s%-24s' % (('---',) * 4))
         print('%-28s%-12s%-24s%-24s' % ('Total', total_params, '', ''))
@@ -741,9 +773,9 @@ class Network:
             for localname, var in self.trainables.items():
                 if '/' in localname:
                     p = localname.split('/')
-                    name = title + '_' + p[-1] + '/' + '_'.join(p[:-1])
+                    name = f'{title}_{p[-1]}/' + '_'.join(p[:-1])
                 else:
-                    name = title + '_toplevel/' + localname
+                    name = f'{title}_toplevel/{localname}'
                 tf.summary.histogram(name, var)
 
 #----------------------------------------------------------------------------
